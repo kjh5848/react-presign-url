@@ -10,6 +10,7 @@ export default function UploadPage() {
   // preview: 선택한 이미지를 화면에 보여주기 위한 Blob URL
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState("");
+  
 
   /**
    * handleFileChange
@@ -29,51 +30,32 @@ export default function UploadPage() {
 
   /**
    * handleUpload
-   * - 파일을 Base64로 변환해 서버에 업로드하는 함수
-   * - FileReader는 브라우저 내장 API로 파일을 읽고 문자열·ArrayBuffer로 변환 가능
+   * - presign 요청 후 S3에 직접 업로드
    */
   const handleUpload = async () => {
-    // 파일이 없으면 중단
     if (!file) return alert("파일을 선택하세요.");
+    try {
+      // 1. presign 요청
+      const res = await imageApi.presign(file.name, file.type);
+      const { key, presignedUrl } = res.data;
 
-    // FileReader:
-    // 브라우저에서 제공하는 비동기 파일 읽기 API
-    // 파일 읽기는 즉시 끝나지 않고, readAsDataURL 실행 후 loadend 이벤트에서 결과 접근
-    const reader = new FileReader();
+      // 2. S3에 PUT
+      const putRes = await fetch(presignedUrl, {
+        method: "PUT",
+        headers: {
+          "Content-Type": file.type,
+        },
+        body: file,
+      });
+      if (!putRes.ok) throw new Error("S3 업로드 실패");
 
-    /**
-     * reader.onloadend
-     * - 파일 읽기가 끝났을 때 실행되는 콜백
-     * - reader.result 값은 "data:image/png;base64,xxx" 형태의 전체 문자열
-     *   → 앞부분의 "data:image/png;base64," 는 파일 형식 정보
-     *   → 실제 Base64 데이터는 "," 뒤쪽만 추출해야 한다.
-     */
-    reader.onloadend = async () => {
-      // "data:image/png;base64,AAAA..." 형식에서 base64 부분만 추출
-      const base64 = reader.result.split(",")[1];
-
-      try {
-        // 서버 업로드 요청 (파일명, base64)
-        await imageApi.upload(file.name, base64);
-
-        alert("업로드 완료!");
-
-        // 업로드 완료 후 페이지 이동
-        navigate("/");
-      } catch (err) {
-        console.error(err);
-        alert("업로드 실패!");
-      }
-    };
-
-    /**
-     * reader.readAsDataURL(file)
-     * readAsDataURL:
-     *   - 파일을 읽어서 base64로 인코딩한 문자열(Data URL)을 생성
-     *   - 비동기적으로 처리되며, 완료되면 onloadend가 호출됨
-     *   - 이미지 업로드 시 backend로 base64 문자열을 보내고 싶을 때 사용
-     */
-    reader.readAsDataURL(file);
+      await imageApi.complete(key);
+      alert("업로드 완료!");
+      navigate("/");
+    } catch (err) {
+      console.error(err);
+      alert("업로드 실패!");
+    }
   };
 
   return (

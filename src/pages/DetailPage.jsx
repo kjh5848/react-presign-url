@@ -29,8 +29,8 @@ export default function DetailPage() {
       <h2>이미지 상세보기</h2>
 
       <img
-        src={`http://localhost:8080${image.url}`}
-        alt={image.fileName}
+        src={image.resizedUrl}
+        alt={image.uuid}
         style={{
           width: 400,
           borderRadius: 8,

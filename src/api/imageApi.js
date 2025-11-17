@@ -10,9 +10,12 @@ const axiosJson = axios.create({
 });
 
 export const imageApi = {
-  upload(fileName, fileData) {
-    const payload = { fileName, fileData };
-    return axiosJson.post('/upload', payload);
+  presign(fileName, contentType) {
+    return axiosJson.post('/presigned', { fileName, contentType });
+  },
+
+  complete(key) {
+    return axios.get(`${BASE_URL}/complete?key=${key}`);
   },
 
   list() {

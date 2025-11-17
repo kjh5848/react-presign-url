@@ -27,8 +27,8 @@ export default function ListPage() {
         {images.map((img) => (
           <Link key={img.id} to={`/detail/${img.id}`}>
             <img
-              src={`http://localhost:8080${img.url}`}
-              alt={img.fileName}
+              src={img.resizedUrl}
+              alt={img.uuid}
               style={{
                 width: 350,
                 height: 350,
