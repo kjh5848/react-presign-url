@@ -24,8 +24,11 @@ export default function DetailPage() {
    */
   useEffect(() => {
     const load = async () => {
-      const metaList = JSON.parse(sessionStorage.getItem("imageMeta"));
-      const localMeta = metaList.find(m => m.fileName === id || m.id === id);
+      const metaList =
+        JSON.parse(sessionStorage.getItem("imageMeta")) || [];
+      const localMeta = metaList.find(
+        (m) => m.fileName === id || m.id === id
+      );
       if (localMeta) {
         setImage({
           id,
@@ -71,8 +74,9 @@ export default function DetailPage() {
     if (!image) return;
 
     // Check for previewUrl in localMeta first
-    const metaList = JSON.parse(sessionStorage.getItem("imageMeta")) || [];
-    const localMeta = metaList.find(m => m.fileName === image?.fileName);
+    const metaList =
+      JSON.parse(sessionStorage.getItem("imageMeta")) || [];
+    const localMeta = metaList.find((m) => m.fileName === image?.fileName);
     if (localMeta && localMeta.previewUrl) {
       setSrc(localMeta.previewUrl);
       return;

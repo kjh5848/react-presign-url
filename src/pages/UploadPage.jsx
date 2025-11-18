@@ -61,6 +61,7 @@ export default function UploadPage() {
       const putRes = await fetch(presignedUrl, {
         method: "PUT",
         headers: { "Content-Type": file.type },
+        headers: { "Content-Type": file.type },
         body: file,
       });
       if (!putRes.ok) throw new Error("S3 업로드 실패");
@@ -79,6 +80,7 @@ export default function UploadPage() {
   return (
     <div style={{ padding: 20 }}>
       <h2>업로드 페이지</h2>
+      <h2>업로드 페이지</h2>
 
       <input type="file" accept="image/*" onChange={handleFileChange} />
 
@@ -88,9 +90,15 @@ export default function UploadPage() {
           src={preview}
           alt="preview"
         />
+        <img
+          style={{ width: 500, height: 500, marginTop: 20 }}
+          src={preview}
+          alt="preview"
+        />
       )}
 
       <br />
+      <button onClick={handleUpload} style={{ marginTop: 20, width: 200 }}>
       <button onClick={handleUpload} style={{ marginTop: 20, width: 200 }}>
         업로드
       </button>
