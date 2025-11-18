@@ -3,149 +3,195 @@ import { useParams, Link } from "react-router-dom";
 import { imageApi } from "../api/imageApi";
 
 export default function DetailPage() {
-  // 1. URL 파라미터에서 이미지 id 추출
-  const { id } = useParams();
+  /**
+   * 라우터 매핑 규칙
+   * - /detail/:id           → { id: "3" }
+   * - /detail/file/:value   → { value: "abc.png" }
+   *
+   * 따라서:
+   * - value 가 있으면: 파일명 기반(로컬/캐시 모드)
+   * - id 가 있으면:     서버 PK 기반(서버 모드)
+   */
+  const { id, value } = useParams();
 
-  // 2. 서버에서 받아온 이미지 정보를 저장하는 상태
   const [image, setImage] = useState(null);
-
-  // 3. 상세 정보 로딩 상태
+  const [src, setSrc] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // 4. 실제로 화면에 표시될 이미지 주소
-  //    - Blob URL(업로드 직후)
-  //    - S3 리사이즈 URL(fallback)
-  const [src, setSrc] = useState(null);
+  /**
+   * sessionStorage에 저장된 imageMeta 배열을 안전하게 로드하는 함수
+   * - JSON.parse(null) 예외 방지
+   */
+  const loadMetaList = () => {
+    const raw = sessionStorage.getItem("imageMeta");
+    return raw ? JSON.parse(raw) : [];
+  };
 
   /**
-   * useEffect #1
-   * - 상세 정보를 sessionStorage에서 우선 조회, 없으면 서버(Spring)에서 조회한다.
-   * - 응답을 받으면 image 상태를 채우고 loading 종료.
+   * 1단계: 상세 정보(메타데이터) 결정
+   *
+   * - value 가 존재 → /detail/file/:fileName 으로 들어온 경우
+   *    → 클라이언트 캐시(imageMeta)에서 먼저 찾고, 없으면 서버 list()에서 파일명으로 검색
+   *
+   * - value 가 없고 id 가 존재 → /detail/:id 로 들어온 경우
+   *    → 서버 detail(id)로 조회
+   *
+   * - 둘 다 없으면 → 잘못된 경로이므로 image=null 처리
    */
   useEffect(() => {
     const load = async () => {
-      const metaList =
-        JSON.parse(sessionStorage.getItem("imageMeta")) || [];
-      const localMeta = metaList.find(
-        (m) => m.fileName === id || m.id === id
-      );
-      if (localMeta) {
-        setImage({
-          id,
-          uuid: null,
-          fileName: localMeta.fileName,
-          resizedUrl: null,
-          createdAt: localMeta.createdAt
-        });
+      const metaList = loadMetaList();
+
+      // -------- 1) 파일명 기반 로컬/캐시 모드 (/detail/file/:fileName) --------
+      if (value) {
+        const localMeta = metaList.find((m) => m.fileName === value);
+
+        // (1) sessionStorage에 저장된 메타데이터가 있으면 그걸로 상세 구성
+        if (localMeta) {
+          setImage({
+            id: "local",                  // 클라이언트 전용 식별자
+            fileName: localMeta.fileName, // 파일명
+            uuid: null,
+            resizedUrl: null,             // 아직 서버 리사이즈 URL 모름
+            createdAt: localMeta.createdAt,
+          });
+          setLoading(false);
+          return;
+        }
+
+        // (2) 로컬 메타가 없다면 서버 목록에서 파일명으로 검색(previewUrl이 없을 때 서버 상세를 다시 조회하도록 설계됨)
+        try {
+          const listRes = await imageApi.list();
+          const match = listRes.data.find((i) => i.fileName === value);
+
+          if (match) {
+            setImage(match); // 서버에서 찾은 DTO 그대로 사용
+          } else {
+            setImage(null);
+          }
+        } catch (e) {
+          console.error("서버 목록 조회 실패:", e);
+          setImage(null);
+        }
         setLoading(false);
         return;
       }
-      try {
-        const res = await imageApi.detail(id);
-        setImage(res.data);
-      } catch (e) {
-        console.error("상세 조회 실패:", e);
-      } finally {
-        setLoading(false);
+
+      // -------- 2) id 기반 서버 모드 (/detail/:id) --------
+      if (id) {
+        try {
+          const res = await imageApi.detail(id);
+          setImage(res.data);
+        } catch (err) {
+          console.error("상세 조회 실패:", err);
+          setImage(null);
+        } finally {
+          setLoading(false);
+        }
+        return;
       }
+
+      // -------- 3) id, value 둘 다 없는 잘못된 요청 --------
+      setImage(null);
+      setLoading(false);
     };
+
     load();
-  }, [id]);
+  }, [id, value]);
 
   /**
-   * useEffect #2
-   * - image가 준비된 후 실제 화면에 보여줄 src를 결정한다.
+   * 2단계: 실제 <img src=...> 에 넣을 이미지 주소 결정
    *
-   * 캐싱/이미지 처리 흐름
-   * ----------------------------------------------------
-   * 1) sessionStorage에 저장된 previewUrl 유무 확인 (localMeta.previewUrl)
-   * 2) 없으면 Blob URL("img:<fileName>") 유무 확인
-   * 3) Blob URL이 없으면 → 바로 S3 리사이즈 URL을 사용한다.
-   * 4) Blob URL이 있으면 → UI에 바로 표시(즉시 렌더링)
-   *    이어서 Blob URL이 실제로 유효한지 fetch로 검사
-   *    - Blob이 깨졌으면 제거하고 S3 URL로 대체한다.
-   * ----------------------------------------------------
+   * - 우선순위
+   *   1) sessionStorage.imageMeta 의 previewUrl(Blob) 이 있으면 그걸 먼저 사용
+   *      - 새로고침으로 Blob이 죽었을 수 있으므로 fetch로 유효성 검사
+   *      - 깨졌으면 previewUrl을 제거하고 서버 resizedUrl로 대체
    *
-   * 이 로직의 목적
-   * - 업로드 직후에는 즉시 미리보기(Blob)를 보여주지만,
-   * - 새로고침 등으로 Blob이 유실되었을 때 자동 복구(fallback)한다.
+   *   2) previewUrl 이 없으면 서버 resizedUrl 사용
    */
   useEffect(() => {
     if (!image) return;
 
-    // Check for previewUrl in localMeta first
-    const metaList =
-      JSON.parse(sessionStorage.getItem("imageMeta")) || [];
-    const localMeta = metaList.find((m) => m.fileName === image?.fileName);
-    if (localMeta && localMeta.previewUrl) {
-      setSrc(localMeta.previewUrl);
+    const metaList = loadMetaList();
+    const meta = metaList.find((m) => m.fileName === image.fileName);
+    const previewUrl = meta?.previewUrl ?? null;
+    console.log("sdfsdf", `${previewUrl}`);
+
+    // -------- 1) previewUrl(Blob)이 있는 경우: 즉시 사용 + 유효성 검사 --------
+    if (previewUrl) {
+      setSrc(previewUrl);
+
+      fetch(previewUrl)
+        .then((res) => {
+          if (!res.ok) throw new Error("invalid blob");
+        })
+        .catch(async () => {
+          // Blob이 이미 사라졌으므로 previewUrl 제거
+          const updated = metaList.map((m) =>
+            m.fileName === image.fileName ? { ...m, previewUrl: null } : m
+          );
+          sessionStorage.setItem("imageMeta", JSON.stringify(updated));
+
+          // ---- 대체 경로: 서버에서 resizedUrl 다시 얻기 ----
+          // (1) 서버 모드: id가 실제 PK 인 경우 → detail(id) 재호출
+          if (image.id !== "local" && image.id != null) {
+            try {
+              const res = await imageApi.detail(image.id);
+              setSrc(res.data.resizedUrl);
+            } catch (e) {
+              console.error("fallback detail 불가:", e);
+            }
+          } else {
+            // (2) 로컬 모드: 파일명으로 서버 list()에서 검색
+            try {
+              const listRes = await imageApi.list();
+              const match = listRes.data.find(
+                (i) => i.fileName === image.fileName
+              );
+              if (match) setSrc(match.resizedUrl);
+            } catch (e) {
+              console.error("fallback list 실패:", e);
+            }
+          }
+        });
+
       return;
     }
 
-    const blobKey = "img:" + image.fileName;
-    const cachedBlobUrl = sessionStorage.getItem(blobKey);
-
-    // 최신 리사이즈 URL 조회 함수
-    const fetchLatest = async () => {
-      try {
-        const res = await imageApi.detail(image.id);
-        setSrc(res.data.resizedUrl);
-      } catch (e) {
-        console.error("최신 정보 요청 실패:", e);
-      }
-    };
-
-    // Blob 캐싱이 없으면 → 바로 리사이즈 URL 사용
-    if (!cachedBlobUrl) {
-      fetchLatest();
-      return;
+    // -------- 2) previewUrl 이 없는 경우: 서버 resizedUrl 바로 사용 --------
+    if (!previewUrl) {
+      (async () => {
+        const listRes = await imageApi.list();
+        const match = listRes.data.find(i => i.fileName === image.fileName);
+        if (match) setSrc(match.resizedUrl);
+        return;
+      })();
     }
-
-    // Blob 캐싱이 있으면 → 즉시 표시
-    setSrc(cachedBlobUrl);
-
-    // Blob 데이터 실제 유효성 검사
-    let cancelled = false;
-    fetch(cachedBlobUrl)
-      .then((res) => {
-        if (!res.ok) throw new Error("Invalid Blob");
-      })
-      .catch(() => {
-        if (cancelled) return;
-        sessionStorage.removeItem(blobKey);
-        fetchLatest();
-      });
-
-    return () => {
-      cancelled = true;
-    };
   }, [image]);
 
-  // 로딩 처리
+  // 로딩 중 표시
   if (loading) return <p style={{ padding: 20 }}>로딩 중...</p>;
+
+  // image 자체를 못찾은 경우
   if (!image) return <p style={{ padding: 20 }}>이미지를 찾을 수 없습니다.</p>;
 
   return (
     <div style={{ padding: 20 }}>
       <h2>이미지 상세보기</h2>
 
-      {/**
-       * 실제 화면에 표시되는 이미지
-       * - 업로드 후 바로 보는 경우 Blob URL이 표시된다.
-       * - 새로고침 후 Blob이 깨지면 자동으로 S3 리사이즈 URL로 전환된다.
-       */}
       <img
         src={src}
-        alt={image.uuid}
+        alt={image.fileName}
         style={{
           width: 420,
+          height: 420,
+          objectFit: "cover",
           borderRadius: 8,
-          border: "1px solid #ddd",
-          marginBottom: 15,
+          border: "1px solid #ccc",
+          marginBottom: 20,
         }}
       />
 
-      {/* 이미지 메타 정보 */}
       <div style={{ fontSize: 14 }}>
         <p>
           <strong>파일명:</strong> {image.fileName}
@@ -159,9 +205,8 @@ export default function DetailPage() {
         </p>
       </div>
 
-      {/* 목록으로 이동 */}
       <Link to="/" style={{ marginTop: 20, display: "inline-block" }}>
-        ← 목록으로 돌아가기
+        ← 목록으로
       </Link>
     </div>
   );

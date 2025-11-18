@@ -15,6 +15,7 @@ export default function App() {
         <Route path="/" element={<ListPage />} />
         <Route path="/upload" element={<UploadPage />} />
         <Route path="/detail/:id" element={<DetailPage />} />
+        <Route path="/detail/file/:value" element={<DetailPage />} />
       </Routes>
     </Router>
   );
