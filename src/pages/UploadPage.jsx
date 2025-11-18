@@ -7,8 +7,9 @@ export default function UploadPage() {
   const navigate = useNavigate();
 
   // file: 실제 사용자가 선택한 파일 객체(File 타입)
-  // preview: 선택한 이미지를 화면에 보여주기 위한 Blob URL
   const [file, setFile] = useState(null);
+
+  // preview: 선택한 이미지를 화면에 보여주기 위한 Blob URL
   const [preview, setPreview] = useState("");
   
 
@@ -25,7 +26,11 @@ export default function UploadPage() {
 
     // 브라우저가 메모리에 임시 URL을 생성해 이미지 미리보기 가능
     // 이 URL은 실제 파일이 아니라 Blob을 가리키는 임시 경로
-    setPreview(URL.createObjectURL(f));
+    const previewUrl = URL.createObjectURL(f);
+    setPreview(previewUrl);
+    // 업로드 직후 화면에서 즉시 사용하기 위해 Blob URL을 sessionStorage에 저장
+    // 새로고침하면 Blob 데이터는 사라지지만 ListPage, DateilPage에서 유효성 검사로 자동 fallback 처리되어 리사이즈 URL을 사용
+    sessionStorage.setItem("img:" + f.name, previewUrl);
   };
 
   /**
@@ -35,28 +40,22 @@ export default function UploadPage() {
   const handleUpload = async () => {
     if (!file) return alert("파일을 선택하세요.");
     try {
-      // 1. presign 요청
+      // 1. Presigned URL 요청
       const res = await imageApi.presign(file.name, file.type);
       const { key, presignedUrl } = res.data;
 
-      // 2. S3에 PUT
+      // 2. S3에 직접 업로드
       const putRes = await fetch(presignedUrl, {
         method: "PUT",
-        headers: {
-          "Content-Type": file.type,
-        },
+        headers: { "Content-Type": file.type },
         body: file,
       });
-
       if (!putRes.ok) throw new Error("S3 업로드 실패");
 
-      // 3. 스프링에 업로드 완료 요청
-      await imageApi.complete(
-        key,
-        file.name
-      );
-      alert("업로드 완료!");
+      // 3. 스프링에 DB 저장 요청
+      await imageApi.complete(key, file.name);
 
+      alert("업로드 완료!");
       navigate("/");
     } catch (err) {
       console.error(err);
@@ -66,22 +65,20 @@ export default function UploadPage() {
 
   return (
     <div style={{ padding: 20 }}>
-      <h2> 업로드 페이지</h2>
+      <h2>업로드 페이지</h2>
 
-      {/* accept="image/*" 
-          - 사용자에게 이미지 파일만 선택하도록 제한하는 input 속성
-      */}
       <input type="file" accept="image/*" onChange={handleFileChange} />
 
-      {/* 파일이 선택되면 preview URL로 미리보기 이미지를 렌더링 */}
       {preview && (
-        <img style={{ width: 500, height: 500 }} src={preview} alt="preview" />
+        <img
+          style={{ width: 500, height: 500, marginTop: 20 }}
+          src={preview}
+          alt="preview"
+        />
       )}
 
       <br />
-
-      {/* 업로드 버튼 */}
-      <button style={{ marginTop: 10, width: 200 }} onClick={handleUpload}>
+      <button onClick={handleUpload} style={{ marginTop: 20, width: 200 }}>
         업로드
       </button>
     </div>
