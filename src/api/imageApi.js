@@ -14,8 +14,8 @@ export const imageApi = {
     return axiosJson.post('/presigned', { fileName, contentType });
   },
 
-  complete(key) {
-    return axios.get(`${BASE_URL}/complete?key=${key}`);
+  complete(key,fileName) {
+    return axiosJson.post('/complete', { key, fileName });
   },
 
   list() {

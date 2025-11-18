@@ -47,10 +47,16 @@ export default function UploadPage() {
         },
         body: file,
       });
+
       if (!putRes.ok) throw new Error("S3 업로드 실패");
 
-      await imageApi.complete(key);
+      // 3. 스프링에 업로드 완료 요청
+      await imageApi.complete(
+        key,
+        file.name
+      );
       alert("업로드 완료!");
+
       navigate("/");
     } catch (err) {
       console.error(err);

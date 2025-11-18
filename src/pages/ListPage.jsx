@@ -32,7 +32,7 @@ export default function ListPage() {
               style={{
                 width: 350,
                 height: 350,
-                objectFit: "fill",
+                objectFit: "cover",
                 borderRadius: 8,
                 border: "1px solid #ccc",
               }}
