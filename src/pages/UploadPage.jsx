@@ -1,97 +1,141 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { imageApi } from "../api/imageApi";
+import { imageMetaStore } from "../utils/imageMetaStore";
+
+/**
+ * UploadPage (localStorage 최종 버전)
+ * --------------------------------------------------------------
+ * 핵심 흐름
+ * 1) 파일 선택 → Blob preview 생성 + localStorage에 임시 저장
+ * 2) presign → S3 PUT 업로드
+ * 3) complete() → 서버 id/uuid/resizedUrl/originalUrl/createdAt 수신
+ * 4) preview + 서버 메타를 localStorage에 upsert
+ * 5) 상세 페이지로 이동 (/detail/:id)
+ *
+ * preview(blob)은 새로고침 시 자연스럽게 invalid가 되고
+ * usePreviewSource 훅이 자동으로 fallback(resizedUrl)로 전환한다.
+ * --------------------------------------------------------------
+ */
 
 export default function UploadPage() {
-  // 업로드 완료 후 메인 페이지("/")로 이동하기 위해 사용
   const navigate = useNavigate();
 
-  // file 상태: 사용자가 파일 선택 필드에서 고른 실제 파일 객체
   const [file, setFile] = useState(null);
-
-  // preview 상태: 브라우저 메모리에서 생성된 임시 Blob URL(이미지 미리보기용)
   const [preview, setPreview] = useState("");
 
   /**
-   * handleFileChange
-   * - 파일 선택 입력 요소에서 파일이 선택될 때 실행됨
-   * - e.target.files[0]은 사용자가 선택한 첫 번째 파일(브라우저 File 객체)
-   * - URL.createObjectURL:
-   *     브라우저가 파일 객체를 읽어 Blob URL을 생성하는 기능
-    *     서버에 파일을 업로드하지 않아도 브라우저 메모리에서 즉시 미리보기 가능
+   * 파일 선택 → preview(blob) 생성 + localStorage 임시 저장
+   * ----------------------------------------------------------------
+   * 아직 서버 id/uuid가 없기 때문에 id=null, uuid=null 상태로 저장된다.
+   * complete() 이후 서버 메타가 upsert로 덮어씌워진다.
    */
   const handleFileChange = (e) => {
     const f = e.target.files[0];
+    if (!f) return;
+
     setFile(f);
 
-    // 브라우저가 파일 객체로 임시 Blob URL을 생성하여 즉시 미리보기 가능하게 함
+    // Blob URL 생성 (React 메모리)
     const previewUrl = URL.createObjectURL(f);
     setPreview(previewUrl);
-
-    // 업로드 직후 목록/상세 화면에서 즉시 표시하기 위해 Blob URL을 sessionStorage에 저장
-    // 새로고침 시 Blob 데이터는 사라지지만 이후 페이지에서 유효성 검사 후 자동으로 대체 처리됨
-    sessionStorage.setItem("img:" + f.name, previewUrl);
-
-    // --- 업로드된 파일 정보를 클라이언트 전용 목록으로 sessionStorage에 저장 ---
-    let metaList = JSON.parse(sessionStorage.getItem("imageMeta")) || [];
-    const meta = {
-      fileName: f.name,
-      previewUrl: previewUrl,
-      createdAt: Date.now(),
-    };
-    metaList.push(meta);
-    sessionStorage.setItem("imageMeta", JSON.stringify(metaList));
   };
 
   /**
-   * handleUpload
- * - Spring 서버에 프리사인드 URL 발급 요청
- * - 발급된 URL로 S3에 바로 업로드(HTTP PUT)
- * - 업로드 완료 후 Spring 서버에 데이터베이스 저장 요청
+   * 업로드 버튼 클릭 → presign → S3 → complete
+   * ----------------------------------------------------------------
+   * presignedUrl 얻은 뒤 S3에 직접 PUT 업로드하고
+   * complete()을 호출하면 서버가 DB에 저장 후 id/uuid/URL을 반환한다.
+   * 그 데이터를 로컬스토리지에 upsert로 통합한다.
    */
   const handleUpload = async () => {
     if (!file) return alert("파일을 선택하세요.");
 
     try {
-      // 1. Presigned URL 발급 요청
-      const res = await imageApi.presign(file.name, file.type);
-      const { key, presignedUrl } = res.data;
+      // 1) presign 발급
+      const presignRes = await imageApi.presign(file.name, file.type);
+      const { key, presignedUrl } = presignRes.data;
 
-      // 2. 발급받은 Presigned URL로 S3에 이미지를 HTTP PUT으로 직접 업로드
+      // 2) S3 업로드
       const putRes = await fetch(presignedUrl, {
         method: "PUT",
         headers: { "Content-Type": file.type },
         body: file,
       });
-      if (!putRes.ok) throw new Error("S3 업로드 실패");
 
-      // 3. Spring 서버에 업로드 완료(DB 저장 요청)
-      await imageApi.complete(key, file.name);
+      if (!putRes.ok) {
+        throw new Error("S3 업로드 실패");
+      }
+
+      // 3) complete() → 서버 DB 저장 + 이미지 메타 반환
+      const completeRes = await imageApi.complete(key, file.name);
+      const meta = completeRes.data;
+
+      /**
+       * complete 응답(meta):
+       * {
+       *   id: number,
+       *   uuid: string,
+       *   fileName: string,
+       *   originalUrl: string,
+       *   resizedUrl: string,
+       *   createdAt: string
+       * }
+       */
+
+      // 4) 로컬스토리지에 preview + 서버 metadata 합쳐 저장
+      imageMetaStore.upsert({
+        id: meta.id,
+        uuid: meta.uuid,
+        fileName: meta.fileName,
+        previewUrl: preview,        // blob preview 유지
+        createdAt: meta.createdAt,  // 서버 시각으로 통일
+        originalUrl: meta.originalUrl,
+        resizedUrl: meta.resizedUrl,
+      });
 
       alert("업로드 완료!");
-      navigate("/");
+      navigate("/"); // 목록 페이지로 이동
+
     } catch (err) {
-      console.error(err);
+      console.error("업로드 오류:", err);
       alert("업로드 실패!");
     }
   };
 
   return (
     <div style={{ padding: 20 }}>
-      <h2>업로드 페이지</h2>
+      <h2>이미지 업로드</h2>
 
-      <input type="file" accept="image/*" onChange={handleFileChange} />
+      {/* 파일 선택 */}
+      <input
+        type="file"
+        accept="image/*"
+        onChange={handleFileChange}
+      />
 
+      {/* 업로드 전 프리뷰 */}
       {preview && (
         <img
-          style={{ width: 500, height: 500, marginTop: 20 }}
           src={preview}
           alt="preview"
+          style={{
+            width: 480,
+            height: 480,
+            marginTop: 20,
+            objectFit: "cover",
+            borderRadius: 8,
+            border: "1px solid #ccc",
+          }}
         />
       )}
 
+      {/* 업로드 버튼 */}
       <br />
-      <button onClick={handleUpload} style={{ marginTop: 20, width: 200 }}>
+      <button
+        onClick={handleUpload}
+        style={{ marginTop: 20, width: 200 }}
+      >
         업로드
       </button>
     </div>
