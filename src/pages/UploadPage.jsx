@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { imageApi } from "../api/imageApi";
+import { imageMetaStore } from "../utils/imageMeta";
 
 export default function UploadPage() {
   // 업로드 완료 후 메인 페이지("/")로 이동하기 위해 사용
@@ -28,19 +29,12 @@ export default function UploadPage() {
     const previewUrl = URL.createObjectURL(f);
     setPreview(previewUrl);
 
-    // 업로드 직후 목록/상세 화면에서 즉시 표시하기 위해 Blob URL을 sessionStorage에 저장
-    // 새로고침 시 Blob 데이터는 사라지지만 이후 페이지에서 유효성 검사 후 자동으로 대체 처리됨
-    sessionStorage.setItem("img:" + f.name, previewUrl);
-
-    // --- 업로드된 파일 정보를 클라이언트 전용 목록으로 sessionStorage에 저장 ---
-    let metaList = JSON.parse(sessionStorage.getItem("imageMeta")) || [];
-    const meta = {
+    imageMetaStore.upsert({
       fileName: f.name,
       previewUrl: previewUrl,
       createdAt: Date.now(),
-    };
-    metaList.push(meta);
-    sessionStorage.setItem("imageMeta", JSON.stringify(metaList));
+      pending: true,
+    });
   };
 
   /**
@@ -67,6 +61,18 @@ export default function UploadPage() {
 
       // 3. Spring 서버에 업로드 완료(DB 저장 요청)
       await imageApi.complete(key, file.name);
+
+      const updated = imageMetaStore.update(file.name, (meta) =>
+        meta ? { ...meta, pending: false } : meta
+      );
+      if (!updated) {
+        imageMetaStore.upsert({
+          fileName: file.name,
+          previewUrl: preview,
+          createdAt: Date.now(),
+          pending: false,
+        });
+      }
 
       alert("업로드 완료!");
       navigate("/");
