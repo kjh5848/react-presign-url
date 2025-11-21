@@ -1,142 +1,80 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { imageApi } from "../api/imageApi";
 import { imageMetaStore } from "../utils/imageMeta";
 import { usePreviewSource } from "../hooks/usePreviewSource";
 
 export default function DetailPage() {
-  /**
-   * 라우터 매핑 규칙
-   * - /detail/:id           → { id: "3" }
-   * - /detail/file/:value   → { value: "abc.png" }
-   *
-   * 따라서:
-   * - value 가 있으면: 파일명 기반(로컬/캐시 모드)
-   * - id 가 있으면:     서버 PK 기반(서버 모드)
-   */
-  const { id, value } = useParams();
-
+  const { id } = useParams();
   const [image, setImage] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  /**
-   * 1단계: 상세 정보(메타데이터) 결정
-   *
-   * - value 가 존재 → /detail/file/:fileName 으로 들어온 경우
-   *    → 클라이언트 캐시(imageMeta)에서 먼저 찾고, 없으면 서버 list()에서 파일명으로 검색
-   *
-   * - value 가 없고 id 가 존재 → /detail/:id 로 들어온 경우
-   *    → 서버 detail(id)로 조회
-   *
-   * - 둘 다 없으면 → 잘못된 경로이므로 image=null 처리
-   */
+  // 1) 세션스토어 → 없으면 서버 조회 후 세션에 캐시
   useEffect(() => {
-    let cancelled = false;
-
-    const resolveImage = async () => {
-      if (value) {
-        const localMeta = imageMetaStore.find(value);
-        if (localMeta) {
-          return {
-            id: "local",
-            fileName: localMeta.fileName,
-            uuid: null,
-            resizedUrl: null,
-            createdAt: localMeta.createdAt,
-          };
-        }
-
-        const res = await imageApi.list();
-        return res.data.find((item) => item.fileName === value) ?? null;
+    const load = async () => {
+      const local = imageMetaStore.find(Number(id));
+      if (local) {
+        setImage(local);
+        setLoading(false);
+        return;
       }
 
-      if (id) {
-        const res = await imageApi.detail(id);
-        return res.data;
-      }
-
-      return null;
-    };
-
-    (async () => {
-      setLoading(true);
-
+      // 2) 서버 조회
       try {
-        const data = await resolveImage();
-        if (!cancelled) setImage(data);
-      } catch (err) {
-        console.error("상세 조회 실패:", err);
-        if (!cancelled) setImage(null);
+        const res = await imageApi.detail(id);
+        const data = res.data;
+        setImage(data);
+
+        // 상세 조회 결과를 세션스토어에 저장해 다음 접근 시 재사용
+        imageMetaStore.add({
+          id: data.id,
+          fileName: data.fileName,
+          resizedUrl: data.resizedUrl,
+          createdAt: data.createdAt,
+          previewUrl: null, // 상세 응답에는 preview가 없으니 명시적으로 비워둠
+          uuid: data.uuid,
+        });
       } finally {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       }
-    })();
-
-    return () => {
-      cancelled = true;
     };
-  }, [id, value]);
 
-  const fallbackResolver = useCallback(async () => {
-    if (!image) return null;
-    if (image.resizedUrl) return image.resizedUrl;
+    load();
+  }, [id]);
 
-    if (image.id && image.id !== "local") {
-      const res = await imageApi.detail(image.id);
-      return res.data.resizedUrl;
-    }
-
-    if (image.fileName) {
-      const listRes = await imageApi.list();
-      const match = listRes.data.find((item) => item.fileName === image.fileName);
-      return match?.resizedUrl ?? null;
-    }
-
-    return null;
-  }, [image]);
-
-  const src = usePreviewSource(image?.fileName, fallbackResolver);
-  const displaySrc = src || image?.resizedUrl || undefined;
-
-  // 로딩 중 표시
-  if (loading) return <p style={{ padding: 20 }}>로딩 중...</p>;
-
-  // image 자체를 못찾은 경우
-  if (!image) return <p style={{ padding: 20 }}>이미지를 찾을 수 없습니다.</p>;
-
-  return (
-    <div style={{ padding: 20 }}>
-      <h2>이미지 상세보기</h2>
-
+  // preview → 깨지면 resizedUrl
+  const ImageViewer = ({ item }) => {
+    const src = usePreviewSource(item);
+    return (
       <img
-        src={displaySrc}
-        alt={image.fileName}
+        src={src || item?.resizedUrl || item?.previewUrl}
+        alt={item?.fileName}
         style={{
           width: 420,
           height: 420,
           objectFit: "cover",
-          borderRadius: 8,
           border: "1px solid #ccc",
+          borderRadius: 8,
           marginBottom: 20,
         }}
       />
+    );
+  };
 
-      <div style={{ fontSize: 14 }}>
-        <p>
-          <strong>파일명:</strong> {image.fileName}
-        </p>
-        <p>
-          <strong>UUID:</strong> {image.uuid}
-        </p>
-        <p>
-          <strong>업로드 시각:</strong>{" "}
-          {new Date(image.createdAt).toLocaleString()}
-        </p>
-      </div>
+  if (loading) return <p>로딩 중…</p>;
+  if (!image) return <p>이미지 없음</p>;
 
-      <Link to="/" style={{ marginTop: 20, display: "inline-block" }}>
-        ← 목록으로
-      </Link>
+  return (
+    <div style={{ padding: 20 }}>
+      <h2>이미지 상세</h2>
+
+      <ImageViewer item={image} />
+
+      <p><strong>ID:</strong> {image.id}</p>
+      <p><strong>파일명:</strong> {image.fileName}</p>
+      <p><strong>uuid:</strong> {image.uuid}</p>
+
+      <Link to="/">← 목록</Link>
     </div>
   );
 }

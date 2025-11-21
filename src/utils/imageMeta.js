@@ -1,53 +1,36 @@
 const STORAGE_KEY = "imageMeta";
 
+// sessionStorage 읽기
 const read = () => {
   const raw = sessionStorage.getItem(STORAGE_KEY);
   return raw ? JSON.parse(raw) : [];
 };
 
+// sessionStorage 쓰기
 const write = (list) => {
   sessionStorage.setItem(STORAGE_KEY, JSON.stringify(list));
 };
 
-const applyUpdate = (meta, update) => {
-  if (typeof update === "function") {
-    const result = update(meta);
-    return result == null ? meta : result;
-  }
-  return { ...meta, ...update };
-};
-
 export const imageMetaStore = {
-  all(options = {}) {
-    const { includePending = true } = options;
-    const list = read();
-    return includePending ? list : list.filter((meta) => !meta.pending);
+  // 전체 조회
+  getAll() {
+    return read();
   },
 
-  find(fileName) {
-    return read().find((m) => m.fileName === fileName) || null;
+  // id로 찾기 (가장 중요)
+  find(id) {
+    return read().find((m) => m.id === id) || null;
   },
 
-  upsert(meta) {
-    const list = read().filter((m) => m.fileName !== meta.fileName);
+  // 서버 complete() 이후 저장
+  add(meta) {
+    const list = read().filter((m) => m.id !== meta.id);
     list.push(meta);
     write(list);
-    return meta;
   },
 
-  update(fileName, patch) {
-    const list = read();
-    const updated = list.map((meta) =>
-      meta.fileName === fileName ? applyUpdate(meta, patch) : meta
-    );
-    write(updated);
-    return updated.find((m) => m.fileName === fileName) || null;
-  },
-
-  clearPreview(fileName) {
-    const list = read().map((m) =>
-      m.fileName === fileName ? { ...m, previewUrl: null } : m
-    );
+  // 서버 목록을 그대로 저장 (새 세션 초기화용)
+  setAll(list) {
     write(list);
   },
 };

@@ -2,58 +2,45 @@ import { useEffect, useState } from "react";
 import { imageMetaStore } from "../utils/imageMeta";
 
 /**
- * 공통 preview 처리 훅
- * - Blob URL이 있으면 우선 사용하고 fetch로 유효성 검사
- * - 깨지면 sessionStorage에서 previewUrl 제거 후 fallbackResolver 재실행
- * - Blob이 없으면 fallbackResolver 결과 사용
+ * id 기준 preview → preview 없으면 → 서버 리사이즈 URL
  */
-export function usePreviewSource(fileName, fallbackResolver) {
-  const [src, setSrc] = useState(null);
+export function usePreviewSource(image) {
+    const [src, setSrc] = useState(null);
 
-  useEffect(() => {
-    if (!fileName || typeof fallbackResolver !== "function") return;
+    useEffect(() => {
+        // 이미지가 없으면 초기화
+        if (!image) {
+            setSrc(null);
+            return;
+        }
 
-    let cancelled = false;
+        // 세션스토어 우선 조회 (없으면 image 객체 자체 사용)
+        const meta = image.id ? imageMetaStore.find(image.id) : null;
+        const previewUrl = meta?.previewUrl ?? image.previewUrl;
+        const resizedUrl = meta?.resizedUrl ?? image.resizedUrl;
 
-    const resolveFallback = async () => {
-      try {
-        return await Promise.resolve(fallbackResolver());
-      } catch (err) {
-        console.error("fallbackResolver failed", err);
-        return null;
-      }
-    };
+        // preview가 없으면 즉시 resized로 설정
+        if (!previewUrl) {
+            setSrc(resizedUrl ?? null);
+            return;
+        }
 
-    const applyFallback = async () => {
-      const fallback = await resolveFallback();
-      if (!cancelled) setSrc(fallback ?? null);
-    };
+        let cancelled = false;
 
-    const meta = imageMetaStore.find(fileName);
-    const previewUrl = meta?.previewUrl ?? null;
+        // preview가 있으면 먼저 표시하고 깨지면 fallback
+        setSrc(previewUrl);
+        fetch(previewUrl)
+            .then((res) => {
+                if (!res.ok) throw new Error("preview 없음");
+            })
+            .catch(() => {
+                if (!cancelled) setSrc(resizedUrl ?? null);
+            });
 
-    if (previewUrl) {
-      setSrc(previewUrl);
+        return () => {
+            cancelled = true;
+        };
+    }, [image]);
 
-      fetch(previewUrl)
-        .then((res) => {
-          if (!res.ok) throw new Error("Invalid blob");
-        })
-        .catch(async () => {
-          imageMetaStore.clearPreview(fileName);
-          await applyFallback();
-        });
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    applyFallback();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [fileName, fallbackResolver]);
-
-  return src;
+    return src;
 }

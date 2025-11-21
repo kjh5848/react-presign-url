@@ -28,13 +28,6 @@ export default function UploadPage() {
     // 브라우저가 파일 객체로 임시 Blob URL을 생성하여 즉시 미리보기 가능하게 함
     const previewUrl = URL.createObjectURL(f);
     setPreview(previewUrl);
-
-    imageMetaStore.upsert({
-      fileName: f.name,
-      previewUrl: previewUrl,
-      createdAt: Date.now(),
-      pending: true,
-    });
   };
 
   /**
@@ -60,19 +53,16 @@ export default function UploadPage() {
       if (!putRes.ok) throw new Error("S3 업로드 실패");
 
       // 3. Spring 서버에 업로드 완료(DB 저장 요청)
-      await imageApi.complete(key, file.name);
+      const serverData = await imageApi.complete(key, file.name);
 
-      const updated = imageMetaStore.update(file.name, (meta) =>
-        meta ? { ...meta, pending: false } : meta
-      );
-      if (!updated) {
-        imageMetaStore.upsert({
-          fileName: file.name,
-          previewUrl: preview,
-          createdAt: Date.now(),
-          pending: false,
-        });
-      }
+      // 4. 요청받은 데이터를 세션 스토어에 등록 (id 기준)
+      imageMetaStore.add({
+        id: serverData.data.id,
+        fileName: serverData.data.fileName,
+        resizedUrl: serverData.data.resizedUrl,
+        createdAt: serverData.data.createdAt,
+        previewUrl: preview,
+      });
 
       alert("업로드 완료!");
       navigate("/");
