@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { imageApi } from "../api/imageApi";
-import { imageMetaStore } from "../utils/imageMeta";
+import { imageStore } from "../store/imageStore";
 
 export default function UploadPage() {
   // 업로드 완료 후 메인 페이지("/")로 이동하기 위해 사용
@@ -53,14 +53,16 @@ export default function UploadPage() {
       if (!putRes.ok) throw new Error("S3 업로드 실패");
 
       // 3. Spring 서버에 업로드 완료(DB 저장 요청)
-      const serverData = await imageApi.complete(key, file.name);
+      const resData = await imageApi.complete(key, file.name);
+      const data = resData.data
 
       // 4. 요청받은 데이터를 세션 스토어에 등록 (id 기준)
-      imageMetaStore.add({
-        id: serverData.data.id,
-        fileName: serverData.data.fileName,
-        resizedUrl: serverData.data.resizedUrl,
-        createdAt: serverData.data.createdAt,
+      imageStore.add({
+        id: data.id,
+        fileName: data.fileName,
+        uuid: data.uuid,
+        resizedUrl: data.resizedUrl,
+        createdAt: data.createdAt,
         previewUrl: preview,
       });
 

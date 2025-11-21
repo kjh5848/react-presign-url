@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { imageApi } from "../api/imageApi";
-import { imageMetaStore } from "../utils/imageMeta";
+import { imageStore } from "../store/imageStore";
 import { Link } from "react-router-dom";
 import { usePreviewSource } from "../hooks/usePreviewSource";
 
@@ -8,7 +8,6 @@ export default function ListPage() {
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  
 
   /**
    * 1. 세션스토어에 데이터가 있으면 즉시 렌더링
@@ -19,7 +18,7 @@ export default function ListPage() {
       setLoading(true);
 
       // 1) 세션스토어에서 읽기
-      const localList = imageMetaStore.getAll();
+      const localList = imageStore.getAll();
 
       if (localList.length > 0) {
         // 세션에 데이터가 있으므로 이것을 먼저 화면에 즉시 렌더링
@@ -30,12 +29,12 @@ export default function ListPage() {
 
       // 2) 세션스토어가 비어 있으므로 서버 API 호출
       try {
-        const res = await imageApi.list();
-        const data = res.data;
+        const resData = await imageApi.list();
+        const data = resData.data;
         setImages(data);
 
         // 서버 데이터를 그대로 세션스토어에 저장
-        imageMetaStore.setAll(
+        imageStore.setAll(
           data.map(item => ({
             id: item.id,
             uuid: item.uuid,
@@ -59,15 +58,15 @@ export default function ListPage() {
   if (images.length === 0) return <p style={{ padding: 20 }}>이미지가 없습니다.</p>;
 
   // 목록 카드 렌더러: 내부에서 preview 검증 훅 사용
-  const ImageItem = ({ img }) => {
-    const src = usePreviewSource(img);
-    const to = `/detail/${img.id}`;
+  const ImageItem = ({ image }) => {
+    const src = usePreviewSource(image);
+    const to = `/detail/${image.id}`;
 
     return (
       <Link to={to}>
         <img
-          src={src || img.resizedUrl || img.previewUrl}
-          alt={img.fileName}
+          src={src || image.resizedUrl || image.previewUrl}
+          alt={image.fileName}
           style={{
             width: 350,
             height: 350,
@@ -85,8 +84,8 @@ export default function ListPage() {
       <h2>이미지 목록</h2>
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-        {images.map((img) => (
-          <ImageItem key={img.id || img.fileName} img={img} />
+        {images.map((image) => (
+          <ImageItem key={image.id || image.fileName} image={image} />
         ))}
       </div>
     </div>

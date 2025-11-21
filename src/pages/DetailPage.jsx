@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { imageApi } from "../api/imageApi";
-import { imageMetaStore } from "../utils/imageMeta";
+import { imageStore } from "../store/imageStore";
 import { usePreviewSource } from "../hooks/usePreviewSource";
 
 export default function DetailPage() {
@@ -12,7 +12,7 @@ export default function DetailPage() {
   // 1) 세션스토어 → 없으면 서버 조회 후 세션에 캐시
   useEffect(() => {
     const load = async () => {
-      const local = imageMetaStore.find(Number(id));
+      const local = imageStore.find(Number(id));
       if (local) {
         setImage(local);
         setLoading(false);
@@ -26,7 +26,7 @@ export default function DetailPage() {
         setImage(data);
 
         // 상세 조회 결과를 세션스토어에 저장해 다음 접근 시 재사용
-        imageMetaStore.add({
+        imageStore.add({
           id: data.id,
           fileName: data.fileName,
           resizedUrl: data.resizedUrl,
@@ -69,10 +69,11 @@ export default function DetailPage() {
       <h2>이미지 상세</h2>
 
       <ImageViewer item={image} />
-
       <p><strong>ID:</strong> {image.id}</p>
       <p><strong>파일명:</strong> {image.fileName}</p>
       <p><strong>uuid:</strong> {image.uuid}</p>
+      <p><strong>업로드 시간:</strong> {image.createdAt}</p>
+
 
       <Link to="/">← 목록</Link>
     </div>

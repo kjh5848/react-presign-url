@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { imageMetaStore } from "../utils/imageMeta";
+import { imageStore } from "../store/imageStore";
 
 /**
  * id 기준 preview → preview 없으면 → 서버 리사이즈 URL
@@ -15,9 +15,9 @@ export function usePreviewSource(image) {
         }
 
         // 세션스토어 우선 조회 (없으면 image 객체 자체 사용)
-        const meta = image.id ? imageMetaStore.find(image.id) : null;
-        const previewUrl = meta?.previewUrl ?? image.previewUrl;
-        const resizedUrl = meta?.resizedUrl ?? image.resizedUrl;
+        const sessionImage = image.id ? imageStore.find(image.id) : null;
+        const previewUrl = sessionImage?.previewUrl ?? image.previewUrl;
+        const resizedUrl = sessionImage?.resizedUrl ?? image.resizedUrl;
 
         // preview가 없으면 즉시 resized로 설정
         if (!previewUrl) {
@@ -25,21 +25,17 @@ export function usePreviewSource(image) {
             return;
         }
 
-        let cancelled = false;
-
-        // preview가 있으면 먼저 표시하고 깨지면 fallback
+        // preview가 있으면 먼저 표시하고 없으면 fallback
         setSrc(previewUrl);
+
         fetch(previewUrl)
             .then((res) => {
-                if (!res.ok) throw new Error("preview 없음");
+                if (!res.ok) throw new Error("previewUrl 없음");
             })
             .catch(() => {
-                if (!cancelled) setSrc(resizedUrl ?? null);
+                // preview가 없으면 바로 resizedUrl 사용
+                setSrc(resizedUrl ?? null);
             });
-
-        return () => {
-            cancelled = true;
-        };
     }, [image]);
 
     return src;

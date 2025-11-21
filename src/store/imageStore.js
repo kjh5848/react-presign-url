@@ -1,4 +1,4 @@
-const STORAGE_KEY = "imageMeta";
+const STORAGE_KEY = "imageStore";
 
 // sessionStorage 읽기
 const read = () => {
@@ -11,22 +11,22 @@ const write = (list) => {
   sessionStorage.setItem(STORAGE_KEY, JSON.stringify(list));
 };
 
-export const imageMetaStore = {
+export const imageStore = {
   // 전체 조회
   getAll() {
     return read();
   },
 
-  // id로 찾기 (가장 중요)
+  // id로 찾기
   find(id) {
     return read().find((m) => m.id === id) || null;
   },
 
   // 서버 complete() 이후 저장
-  add(meta) {
-    const list = read().filter((m) => m.id !== meta.id);
-    list.push(meta);
-    write(list);
+  add(newImage) {
+    const update = read().filter((img) => img.id !== newImage.id);
+    update.push(newImage);
+    write(update);
   },
 
   // 서버 목록을 그대로 저장 (새 세션 초기화용)
